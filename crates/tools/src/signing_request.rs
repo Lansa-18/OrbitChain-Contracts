@@ -21,10 +21,12 @@ use std::env;
 const CROCKFORD_ALPHABET: &[u8; 32] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 
 /// Version byte prefixing Stellar ed25519 public account IDs (`G…`).
-const ED25519_PUBLIC_VERSION_BYTE: u8 = b'G';
+/// Per SEP-23 strkey: `6 << 3` (0x30), whose top 5 base32 bits render as 'G'.
+const ED25519_PUBLIC_VERSION_BYTE: u8 = 6 << 3;
 
 /// Version byte prefixing Stellar ed25519 secret seeds (`S…`).
-const ED25519_SEED_VERSION_BYTE: u8 = b'S';
+/// Per SEP-23 strkey: `18 << 3` (0x90), whose top 5 base32 bits render as 'S'.
+const ED25519_SEED_VERSION_BYTE: u8 = 18 << 3;
 
 /// Decoded strkey length in bytes: 1 version byte + 32 key bytes + 2 CRC16 bytes.
 const STRKEY_DECODED_LEN: usize = 35;
@@ -284,7 +286,10 @@ impl ServerSignedTransaction {
                 sig_bytes.len()
             );
         }
-        let signature = Signature::from_bytes(&sig_bytes);
+        let sig_array: [u8; 64] = sig_bytes
+            .try_into()
+            .map_err(|_| anyhow!("Ed25519 signature must decode to exactly 64 bytes"))?;
+        let signature = Signature::from_bytes(&sig_array);
 
         Ok(verifying_key
             .verify(self.transaction_xdr.as_bytes(), &signature)
@@ -307,8 +312,9 @@ impl SigningRequest {
         crate::key_manager::KeyManager::validate_secret_key(secret_key)?;
 
         let seed_bytes = strkey_decode(secret_key, "secret")?;
-        let signing_key = SigningKey::from_bytes(&seed_bytes)
-            .map_err(|e| anyhow!("Invalid Stellar secret seed for Ed25519 keypair: {}", e))?;
+        // ed25519-dalek 2.x: `SigningKey::from_bytes` is infallible for a
+        // 32-byte seed (strkey_decode already guarantees the length).
+        let signing_key = SigningKey::from_bytes(&seed_bytes);
         let verifying_key = signing_key.verifying_key();
 
         // `SigningKey::sign` (from the `Signer` trait) is RFC 8032
@@ -449,13 +455,20 @@ fn strkey_encode(key: &[u8; 32], type_byte: u8) -> String {
 mod tests {
     use super::*;
 
-    /// Classic Stellar testnet keypair — round-trips through `strkey_*`.
-    /// Public key is the canonical Ed25519 point derived from the seed;
-    /// signing and verifying should never produce a different public key.
+    /// Deterministic test keypair (seed = `[7u8; 32]`), strkey-encoded with
+    /// this module's own `strkey_encode`. The public key is the canonical
+    /// Ed25519 point derived from the seed; signing and verifying should
+    /// never produce a different public key.
     const FIXTURE_SECRET: &str =
-        "SBZXVMIRWXL5VZVKXWV2FGKYTQ5VV5VRNJYQVZKYWW3XYVYP3IXGKDU";
+        "SADQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQP54X";
     const FIXTURE_PUBLIC: &str =
-        "GBZXVMIRWXL5VZVKXWV2FGKYTQ5VV5VRNJYQVZKYWW3XYVYP3IXGKDU";
+        "GDVEU3DD4KOFECV66VIHWEZOYX4ZKR3WV27L464SIIPOU2IUI3JCZA57";
+
+    /// A second, unrelated deterministic keypair (seed = `[9u8; 32]`).
+    const OTHER_SECRET: &str =
+        "SAEQSCIJBEEQSCIJBEEQSCIJBEEQSCIJBEEQSCIJBEEQSCIJBEEQTDMN";
+    const OTHER_PUBLIC: &str =
+        "GD6ROJBYLKQMOW3E7N4M2YBPUHMZD7PL65VRHRMO24BOVSBV5H3BQRSL";
 
     fn fixture_request() -> SigningRequest {
         SigningRequest {
@@ -532,9 +545,10 @@ mod tests {
 
     #[test]
     fn test_strkey_decode_rejects_invalid_or_short() {
+        // 56 chars but containing the digit `0`, which is outside the alphabet.
+        let with_zero = format!("{}0", &FIXTURE_PUBLIC[..55]);
         assert!(
-            strkey_decode("GBZXVMIRWXL5VZVKXWV2FGKYTQ5VV5VRNJYQVZKYWW3XYVYP3IXGKD0", "public")
-                .is_err(),
+            strkey_decode(&with_zero, "public").is_err(),
             "digit `0` must be rejected by Crockford decoder"
         );
         assert!(
@@ -586,8 +600,7 @@ mod tests {
         let req = fixture_request();
         // Sign with one secret, then swap in an unrelated public key.
         let mut signed = req.sign_server_side(FIXTURE_SECRET).unwrap();
-        signed.signer_public_key =
-            "GCNVD4NI7K2SVQHCB4QKV3WMZ5XS3DMMVJCTPCBU3HJZRJQZTIPMXBNP".to_string();
+        signed.signer_public_key = OTHER_PUBLIC.to_string();
         assert!(!signed.verify().unwrap());
     }
 
@@ -621,10 +634,7 @@ mod tests {
     fn test_sign_server_side_different_keys_differ() {
         let req = fixture_request();
         let sig1 = req.sign_server_side(FIXTURE_SECRET).unwrap().signature;
-        let sig2 = req
-            .sign_server_side("SCZANGBA5QDPSBM5QOTSXSI7JKEFYABMUQRPTGMWNJKFA5ENDNSQSTE")
-            .unwrap()
-            .signature;
+        let sig2 = req.sign_server_side(OTHER_SECRET).unwrap().signature;
         assert_ne!(sig1, sig2);
     }
 

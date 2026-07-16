@@ -282,7 +282,7 @@ mod tests {
     #[test]
     fn test_store_and_retrieve_secret_key() -> Result<()> {
         let mut vault = EncryptedVault::with_password("secure_password")?;
-        let secret_key = "SBZXVMIRWXL5VZVKXWV2FGKYTQ5VV5VRNJYQVZKYWW3XYVYP3IXGKDU";
+        let secret_key = "SADQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQP54X";
 
         vault.store_secret_key("admin_secret_key", secret_key)?;
         let retrieved = vault.retrieve_secret_key("admin_secret_key")?;
@@ -294,7 +294,7 @@ mod tests {
     #[test]
     fn test_store_and_retrieve_public_key() -> Result<()> {
         let mut vault = EncryptedVault::new();
-        let public_key = "GBZXVMIRWXL5VZVKXWV2FGKYTQ5VV5VRNJYQVZKYWW3XYVYP3IXGKDU";
+        let public_key = "GDVEU3DD4KOFECV66VIHWEZOYX4ZKR3WV27L464SIIPOU2IUI3JCZA57";
 
         vault.store_public_key("admin_public_key", public_key)?;
         let retrieved = vault.retrieve_public_key("admin_public_key")?;
@@ -316,8 +316,8 @@ mod tests {
         let temp_path = "/tmp/test_vault.enc";
         
         let mut vault = EncryptedVault::with_password("test_password")?;
-        vault.store_secret_key("admin_secret_key", "SBZXVMIRWXL5VZVKXWV2FGKYTQ5VV5VRNJYQVZKYWW3XYVYP3IXGKDU")?;
-        vault.store_public_key("admin_public_key", "GBZXVMIRWXL5VZVKXWV2FGKYTQ5VV5VRNJYQVZKYWW3XYVYP3IXGKDU")?;
+        vault.store_secret_key("admin_secret_key", "SADQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQP54X")?;
+        vault.store_public_key("admin_public_key", "GDVEU3DD4KOFECV66VIHWEZOYX4ZKR3WV27L464SIIPOU2IUI3JCZA57")?;
         
         vault.save_to_file(temp_path)?;
 
@@ -325,8 +325,8 @@ mod tests {
         let secret = loaded_vault.retrieve_secret_key("admin_secret_key")?;
         let public = loaded_vault.retrieve_public_key("admin_public_key")?;
 
-        assert_eq!(secret, "SBZXVMIRWXL5VZVKXWV2FGKYTQ5VV5VRNJYQVZKYWW3XYVYP3IXGKDU");
-        assert_eq!(public, "GBZXVMIRWXL5VZVKXWV2FGKYTQ5VV5VRNJYQVZKYWW3XYVYP3IXGKDU");
+        assert_eq!(secret, "SADQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQP54X");
+        assert_eq!(public, "GDVEU3DD4KOFECV66VIHWEZOYX4ZKR3WV27L464SIIPOU2IUI3JCZA57");
 
         // Cleanup
         let _ = fs::remove_file(temp_path);
@@ -336,7 +336,7 @@ mod tests {
     #[test]
     fn test_export_to_env_vars() -> Result<()> {
         let mut vault = EncryptedVault::new();
-        vault.store_public_key("admin_public_key", "GBZXVMIRWXL5VZVKXWV2FGKYTQ5VV5VRNJYQVZKYWW3XYVYP3IXGKDU")?;
+        vault.store_public_key("admin_public_key", "GDVEU3DD4KOFECV66VIHWEZOYX4ZKR3WV27L464SIIPOU2IUI3JCZA57")?;
 
         let vars = vault.export_to_env_vars();
         assert!(!vars.is_empty());
