@@ -26,12 +26,12 @@ pub mod views;
 
 use soroban_sdk::{contract, contractimpl, Address, BytesN, Env, String, Vec};
 use storage::{
-    acquire_lock, get_campaign, get_donor, get_donor_asset_donation, get_milestone,
-    increment_donor_asset_donation, is_frozen, release_lock, set_campaign, set_donor, set_frozen,
-    set_milestone, storage_get_donation_count, storage_get_release_count, storage_get_total_raised,
-    storage_get_unique_donor_count, storage_increment_asset_raised,
+    acquire_lock, bump_all_persistent, get_campaign, get_donor, get_donor_asset_donation,
+    get_milestone, increment_donor_asset_donation, is_frozen, release_lock, set_campaign,
+    set_donor, set_frozen, set_milestone, storage_get_donation_count, storage_get_release_count,
+    storage_get_total_raised, storage_get_unique_donor_count, storage_increment_asset_raised,
     storage_increment_donation_count, storage_increment_unique_donor_count,
-    storage_set_total_raised,
+    storage_set_total_raised, unlock_milestones_batch,
 };
 
 use types::{
@@ -238,23 +238,11 @@ impl CampaignContract {
             storage_increment_unique_donor_count(&env);
         }
 
-        // Issue #195 – milestone unlock check
-        for i in 0..campaign.milestone_count {
-            if let Some(mut milestone) = get_milestone(&env, i) {
-                if milestone.status == MilestoneStatus::Locked
-                    && campaign.raised_amount >= milestone.target_amount
-                {
-                    milestone.status = MilestoneStatus::Unlocked;
-                    set_milestone(&env, i, &milestone);
-                    // Emit milestone_unlocked event
-                    event::milestone_unlocked(
-                        &env,
-                        i,
-                        milestone.target_amount,
-                        campaign.raised_amount,
-                    );
-                }
-            }
+        // Issue #195 – milestone unlock check.
+        // Issue #118 – batched: one storage read + at most one write for the
+        // whole burst, instead of a read/write pair per milestone.
+        for (index, target_amount) in unlock_milestones_batch(&env, campaign.raised_amount).iter() {
+            event::milestone_unlocked(&env, index, target_amount, campaign.raised_amount);
         }
 
         // Emit donation_received event
@@ -647,6 +635,23 @@ impl CampaignContract {
         event::contract_frozen(&env, &campaign.creator, timestamp);
     }
 
+    /// Issue #120 – Public TTL maintenance entrypoint.
+    ///
+    /// Extends the TTL of every core persistent key (campaign record,
+    /// counters, and each milestone) in one call. Deliberately callable by
+    /// anyone, with no auth: extending TTL is strictly protective — it
+    /// cannot mutate state or shorten a lifetime — and the point of the
+    /// entrypoint is that off-chain indexers and archivers can keep a
+    /// long-running campaign alive without holding the creator's key.
+    ///
+    /// # Panics
+    /// - `Error::NotInitialized` if the campaign is not yet initialized
+    pub fn bump_storage(env: Env) {
+        let campaign =
+            get_campaign(&env).unwrap_or_else(|| panic_with_error(&env, Error::NotInitialized));
+        bump_all_persistent(&env, campaign.milestone_count);
+    }
+
     /// Issue #246 – Unfreeze the contract, re-enabling mutating operations.
     ///
     /// Only the admin (creator) can call this.
@@ -852,10 +857,12 @@ pub fn validate_milestone_transition(
 
 #[cfg(test)]
 mod test {
+    pub mod bump_storage_tests;
     pub mod claim_refund_tests;
     pub mod get_campaign_status_tests;
     pub mod integration_tests;
     pub mod invariant_tests;
+    pub mod milestone_batch_tests;
     pub mod negative_path_tests;
     pub mod refund_eligibility_tests;
     pub mod release_milestone_tests;
